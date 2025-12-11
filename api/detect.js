@@ -1,5 +1,7 @@
 export default async function handler(req, res) {
+  // -------------------------
   // CORS
+  // -------------------------
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -9,58 +11,68 @@ export default async function handler(req, res) {
   }
 
   const code = req.query.code;
+
   if (!code) {
     return res.status(400).json({ error: "Missing code" });
   }
 
   // -------------------------
-  // 1. FAZT API (con token)
+  // 1. PROVEEDOR: FAZT (API real)
   // -------------------------
+
   const faztApiUrl = `https://api.fazt.cl/api/v2/shipments/${code}`;
-  const faztToken = process.env.FAZT_TOKEN; // lo pones en env vars de Vercel
+  const faztToken = process.env.FAZT_TOKEN;
 
   try {
     const faztResponse = await fetch(faztApiUrl, {
+      method: "GET",
       headers: {
         "Authorization": `Bearer ${faztToken}`,
-        "Content-Type": "application/json"
+        "Accept": "application/json"
       }
     });
 
     if (faztResponse.ok) {
-      const data = await faztResponse.json();
+      const faztData = await faztResponse.json();
+
       return res.status(200).json({
         provider: "fazt",
         tracking_url: `https://panel.fazt.cl/tracking/MjIwLExhIE1hc2NvdGE==/buscar-codigo/${code}`,
-        data
+        data: faztData
       });
     }
+
   } catch (err) {
-    console.error("Error Fazt:", err);
+    console.error("Error consultando Fazt API:", err);
   }
 
   // -------------------------
-  // 2. SIMPLIROUTE HTML HEAD
+  // 2. PROVEEDOR: SimpliRoute (HTML público)
   // -------------------------
-  const srURL = `https://livetracking.simpliroute.com/widget/account/68768/tracking/${code}`;
+
+  const srUrl = `https://livetracking.simpliroute.com/widget/account/68768/tracking/${code}`;
 
   try {
-    const srResp = await fetch(srURL, { method: "HEAD" });
+    // HEAD detecta si la página existe sin descargarla entera
+    const srResp = await fetch(srUrl, { method: "HEAD" });
 
+    // 200 ó 302 → existe
     if (srResp.status === 200 || srResp.status === 302) {
       return res.status(200).json({
         provider: "simpliroute",
-        tracking_url: srURL,
-        data: null // no tenemos json hasta que SR entregue token
+        tracking_url: srUrl,
+        data: null
       });
     }
+
   } catch (err) {
-    console.error("Error SR:", err);
+    console.error("Error consultando SimpliRoute:", err);
   }
 
   // -------------------------
-  // 3. NO ENCONTRADO
+  // 3. PROVEEDOR NO ENCONTRADO
   // -------------------------
+
   return res.status(404).json({
     provider: null,
     message: "Shipment not found in Fazt or SimpliRoute"
