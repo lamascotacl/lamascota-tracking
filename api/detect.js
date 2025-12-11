@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   // 1. PROVEEDOR: FAZT (API real)
   // -------------------------
 
-  const faztApiUrl = `https://api.fazt.cl/api/v2/shipments/${code}`;
+  const faztApiUrl = `https://staging-api.fazt.cl/api/v2/shipments/${code}`;
   const faztToken = process.env.FAZT_TOKEN;
 
   try {
