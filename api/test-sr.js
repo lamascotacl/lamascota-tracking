@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // CORS básico
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -32,7 +32,6 @@ export default async function handler(req, res) {
       }
     });
 
-    // Log para depurar
     const log = {
       status: response.status,
       statusText: response.statusText,
