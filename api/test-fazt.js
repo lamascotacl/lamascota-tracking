@@ -2,7 +2,7 @@ export default async function handler(req, res) {
   const code = req.query.code;
   const token = process.env.FAZT_TOKEN;
 
-  const url = `https://staging-api.fazt.cl/api/v2/shipments/${code}`;
+  const url = `https://api.fazt.cl/api/v2/shipments/${code}`;
 
   try {
     const faztResp = await fetch(url, {
