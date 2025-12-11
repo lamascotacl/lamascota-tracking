@@ -4,45 +4,49 @@ export default async function handler(req, res) {
   const code = req.query.code;
 
   if (!code) {
-    return res.status(400).json({ error: "Missing code" });
+    return res.status(400).json({ error: "Missing code parameter" });
   }
 
-  // URLs para consulta
-  const faztEncoded = "MjIwLExhIE1hc2NvdGE=="; // Base64("220,La Mascota")
+  // SimpliRoute
   const simpliURL = `https://livetracking.simpliroute.com/widget/account/68768/tracking/${code}`;
-  const faztURL = `https://panel.fazt.cl/tracking/${faztEncoded}/buscar-codigo/${code}`;
+
+  // Fazt API
+  const faztApiUrl = `https://api.fazt.cl/api/v2/shipments/${code}`;
 
   try {
-    // 1) Probar Fazt primero
-    const faztResponse = await fetch(faztURL, { method: "GET" });
+    // Primero probamos Fazt (API real)
+    const faztResponse = await fetch(faztApiUrl, { method: "GET" });
 
     if (faztResponse.status === 200) {
+      // Fazt encontró datos válidos
+      const data = await faztResponse.json();
       return res.status(200).json({
-        carrier: "fazt",
-        url: faztURL
+        provider: "fazt",
+        url: `https://panel.fazt.cl/tracking/MjIwLExhIE1hc2NvdGE==/buscar-codigo/${code}`,
+        shipment: data
       });
     }
-  } catch (err) {
-    // si falla, seguimos
+  } catch (error) {
+    // error en la petición de Fazt — seguimos con SimpliRoute
   }
 
   try {
-    // 2) Probar SimpliRoute
-    const srResponse = await fetch(simpliURL, { method: "GET" });
+    // Intentamos SimpliRoute usando un GET
+    const simpliResponse = await fetch(simpliURL, { method: "GET" });
 
-    if (srResponse.status === 200) {
+    if (simpliResponse.status === 200) {
       return res.status(200).json({
-        carrier: "simpliroute",
+        provider: "simpliroute",
         url: simpliURL
       });
     }
-  } catch (err) {
-    // ignoramos
+  } catch (error) {
+    // error en SimpliRoute
   }
 
-  // Ninguno respondió 200
+  // Si ambos fallan:
   return res.status(404).json({
-    carrier: "unknown",
-    message: "Código no encontrado en ningún proveedor"
+    provider: null,
+    message: "Shipment not found in either provider"
   });
 }
