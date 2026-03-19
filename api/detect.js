@@ -1,120 +1,102 @@
-// =====================================
-//   TOKEN DINÁMICO FAZT
-// =====================================
-let faztToken = null;
-let faztTokenExpiresAt = 0;
-
-async function getFaztToken() {
-  const now = Date.now();
-
-  if (faztToken && now < faztTokenExpiresAt) {
-    return faztToken;
-  }
-
-  const email = process.env.FAZT_EMAIL;
-  const password = process.env.FAZT_PASSWORD;
-
-  if (!email || !password) {
-    throw new Error("FAZT_EMAIL o FAZT_PASSWORD no configurados en Vercel.");
-  }
-
-  const loginUrl = "https://api.fazt.cl/api/login";
-
-  const resp = await fetch(loginUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    body: JSON.stringify({ email, password })
-  });
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`Error login Fazt: ${resp.status} - ${txt}`);
-  }
-
-  const data = await resp.json();
-  const token = data.access_token || data.token;
-
-  if (!token) {
-    throw new Error("Fazt login no devolvió access_token/token.");
-  }
-
-  faztToken = token;
-  faztTokenExpiresAt = now + 5.5 * 60 * 60 * 1000;
-
-  return faztToken;
-}
-
-
-// =====================================
-//   HANDLER PRINCIPAL
-// =====================================
 export default async function handler(req, res) {
-
   // --- CORS ---
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-User-Email, X-User-Token");
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  const code = req.query.code;
+  const code = (req.query.code || "").trim();
 
   if (!code) {
     return res.status(400).json({ error: "Missing code" });
   }
 
+  const senduEmail = process.env.SENDU_USER_EMAIL;
+  const senduToken = process.env.SENDU_USER_TOKEN;
+
+  if (!senduEmail || !senduToken) {
+    return res.status(500).json({
+      error: "SENDU_USER_EMAIL o SENDU_USER_TOKEN no configurados en Vercel."
+    });
+  }
 
   // =====================================
-  //   1. INTENTAR FAZT (API REAL)
+  //   1. INTENTAR SENDU
   // =====================================
   try {
-    const token = await getFaztToken();
+    const senduUrl = `https://app.sendu.cl/api/work_orders.json?keywords=${encodeURIComponent(code)}`;
 
-    const faztApiUrl = `https://api.fazt.cl/api/v2/shipments/${code}`;
-
-    const faztResponse = await fetch(faztApiUrl, {
+    const senduResponse = await fetch(senduUrl, {
       method: "GET",
       headers: {
-        "Authorization": `Bearer ${token}`,
-        "Accept": "application/json"
+        "Accept": "application/json",
+        "X-User-Email": senduEmail,
+        "X-User-Token": senduToken
       }
     });
 
-    // Si FAZT encontró el envío → respuesta 200
-    if (faztResponse.ok) {
-      const faztData = await faztResponse.json();
+    if (senduResponse.ok) {
+      const senduData = await senduResponse.json();
 
-      return res.status(200).json({
-        provider: "fazt",
-        tracking_url: `https://panel.fazt.cl/tracking/MjIwLExhIE1hc2NvdGE==/buscar-codigo/${code}`,
-        data: faztData
+      // Normalizar respuesta a array
+      let items = [];
+
+      if (Array.isArray(senduData)) {
+        items = senduData;
+      } else if (Array.isArray(senduData.work_orders)) {
+        items = senduData.work_orders;
+      } else if (senduData.work_order) {
+        items = [senduData.work_order];
+      } else if (senduData) {
+        items = [senduData];
+      }
+
+      // Buscar coincidencia razonable
+      const shipment = items.find(item => {
+        const order = String(item.order || "").trim();
+        const courierOt = String(item.courier_ot || "").trim();
+        return order === code || courierOt === code;
       });
-    }
 
-    // Si no es 404, es un error
-    if (faztResponse.status !== 404) {
-      console.error("Error en Fazt:", faztResponse.status);
+      if (shipment) {
+        return res.status(200).json({
+          provider: "sendu",
+          tracking_url: null,
+          data: shipment
+        });
+      }
+
+      // Si respondió OK pero no hubo coincidencia exacta
+      if (items.length > 0) {
+        return res.status(200).json({
+          provider: "sendu",
+          tracking_url: null,
+          data: items[0]
+        });
+      }
+    } else {
+      const txt = await senduResponse.text();
+      console.error("Error Sendu:", senduResponse.status, txt);
     }
 
   } catch (err) {
-    console.error("Fazt Error:", err);
+    console.error("Sendu Error:", err);
   }
 
-
   // =====================================
-  //   2. SIMPLIROUTE → URL PÚBLICA
+  //   2. SIMPLIROUTE
   // =====================================
-  const srUrl = `https://livetracking.simpliroute.com/widget/account/68768/tracking/${code}`;
+  const srUrl = `https://livetracking.simpliroute.com/widget/account/68768/tracking/${encodeURIComponent(code)}`;
 
   try {
-    const head = await fetch(srUrl, { method: "HEAD" });
+    const head = await fetch(srUrl, {
+      method: "HEAD",
+      redirect: "manual"
+    });
 
-    // HEAD 200 o 302 → Existe → Es SimpliRoute
     if (head.status === 200 || head.status === 302) {
       return res.status(200).json({
         provider: "simpliroute",
@@ -122,7 +104,6 @@ export default async function handler(req, res) {
         data: null
       });
     }
-
   } catch (err) {
     console.error("SimpliRoute Error:", err);
   }
@@ -132,6 +113,6 @@ export default async function handler(req, res) {
   // =====================================
   return res.status(404).json({
     provider: null,
-    message: "Shipment not found in Fazt or SimpliRoute"
+    message: "Shipment not found in Sendu or SimpliRoute"
   });
 }
